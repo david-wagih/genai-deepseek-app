@@ -1,4 +1,15 @@
+torch>=2.0.1
+torchvision>=0.15.2
 langchain_core
 langchain_ollama
 langchain_community
 streamlit
+qdrant-client
+tqdm
+transformers
+Pillow
+colpali-engine
+IPython
+pdf2image
+fastembed
+flash-attn
