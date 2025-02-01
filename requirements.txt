@@ -1,15 +1,23 @@
-torch>=2.0.1
-torchvision>=0.15.2
+# Core dependencies
 langchain_core
-langchain_ollama
+langchain
 langchain_community
-streamlit
+
+# LLM and Embeddings
+langchain-deepseek-official
+langchain-huggingface
+
+# Vector Store
 qdrant-client
-tqdm
-transformers
-Pillow
-colpali-engine
-IPython
+
+# Document Processing
+PyPDF2
 pdf2image
-fastembed
-flash-attn
+
+# Web Search
+tavily-python
+
+# Utilities
+typing-extensions
+python-dotenv
+pypdf
