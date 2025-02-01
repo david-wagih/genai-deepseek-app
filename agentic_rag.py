@@ -64,7 +64,7 @@ class RAGSystem:
         
         return results
     
-    def setup_vectorstore(self, documents: List[Any], qdrant_url: str) -> None:
+    def setup_vectorstore(self, documents: List[Any], qdrant_url: str, collection_name: str = "documents") -> None:
         embeddings = HuggingFaceEmbeddings(
             model_name="BAAI/bge-small-en-v1.5",
             encode_kwargs={
@@ -73,22 +73,22 @@ class RAGSystem:
             }
         )
         
-        # Create vectorstore with basic configuration
+        # Create vectorstore with unique collection name
         self.vectorstore = Qdrant.from_documents(
             documents,
             embeddings,
             url=qdrant_url,
             prefer_grpc=True,
-            collection_name="documents",
+            collection_name=collection_name,  # Use unique collection name
             api_key=os.environ["QDRANT_API_KEY"]
         )
         
-        # Configure the retriever with improved search parameters
+        # Configure the retriever
         self.vectorstore._retriever = self.vectorstore.as_retriever(
             search_kwargs={
-                "k": 4,  # Increase number of documents
-                "score_threshold": 0.5,  # Lower threshold for more results
-                "fetch_k": 20  # Fetch more candidates before filtering
+                "k": 4,
+                "score_threshold": 0.5,
+                "fetch_k": 20
             }
         )
     
@@ -105,16 +105,24 @@ class RAGSystem:
         
         tools = [retriever, search]
         
-        # Create LLM based on provider
-        llm = (ChatDeepSeek(model_name="deepseek-chat", temperature=0, api_key=os.environ["DEEPSEEK_API_KEY"]) 
-               if provider == LLMProvider.DEEPSEEK 
-               else ChatOllama(model="deepseek-r1:1.5b", temperature=0))
-        
-        # Improved prompt template
-        system_message = """You are a knowledgeable AI assistant that helps users understand documents. 
-CRITICAL: DO NOT use XML-style tags like <think> in your responses.
-CRITICAL: Follow the EXACT format below - no deviations or extra text allowed.
-CRITICAL: Always provide specific search queries, not placeholders."""
+        system_message = """You are a knowledgeable AI assistant analyzing documents. NEVER use XML tags.
+
+When responding, STRICTLY follow this format:
+
+Thought: Brief analysis of what to do next
+Action: retriever
+Action Input: "specific search query"
+Observation: (system provides search results)
+Thought: Analysis of the results
+Final Answer: Clear, concise conclusion
+
+Guidelines:
+1. Start EVERY response with "Thought:"
+2. Follow EACH thought with "Action:" and "Action Input:"
+3. Wait for "Observation:" from the system
+4. End with a "Final Answer:"
+5. NEVER use XML tags or <think> tags
+6. NEVER skip steps in the format"""
 
         template = """Available Tools:
 {tool_names}
@@ -122,23 +130,15 @@ CRITICAL: Always provide specific search queries, not placeholders."""
 Tool Details:
 {tools}
 
-EXACT Format to Follow:
-Thought: <your actual thought process>
-Action: <tool_name>
-Action Input: "your specific search query"
-Observation: <wait for result>
-Thought: <your analysis of the observation>
-Final Answer: <your concise answer>
-
-Example:
-Thought: I need to find information about Apache Kafka
+Example of CORRECT format:
+Thought: I need to search the document for main topics
 Action: retriever
-Action Input: "Apache Kafka definition introduction overview"
-Observation: <result>
-Thought: The document explains that Kafka is...
-Final Answer: Apache Kafka is...
+Action Input: "document main topics and key points"
+Observation: (system provides results)
+Thought: The document appears to be about...
+Final Answer: This document contains...
 
-Question: {input}
+Your task: {input}
 {agent_scratchpad}"""
 
         prompt = ChatPromptTemplate.from_messages([
@@ -146,6 +146,16 @@ Question: {input}
             MessagesPlaceholder(variable_name="chat_history", optional=True),
             ("human", template),
         ])
+
+        # Configure LLM with stricter settings
+        llm = (ChatDeepSeek(
+            model_name="deepseek-chat",
+            temperature=0.3,  # Lower temperature for more consistent formatting
+            max_tokens=2000,
+            top_p=0.1,  # More focused responses
+            api_key=os.environ["DEEPSEEK_API_KEY"]
+        ) if provider == LLMProvider.DEEPSEEK 
+        else ChatOllama(model="mistral:latest", temperature=0.3))
         
         agent = create_react_agent(llm=llm, tools=tools, prompt=prompt)
         
@@ -154,9 +164,8 @@ Question: {input}
             tools=tools,
             handle_parsing_errors=True,
             verbose=True,
-            max_iterations=5,  # Increase max iterations
-            max_execution_time=30,  # Add timeout in seconds
-            early_stopping_method="generate",  # Add early stopping
+            max_iterations=3,
+            max_execution_time=30,
             return_intermediate_steps=True
         )
 
