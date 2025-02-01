@@ -11,6 +11,7 @@ from langchain_deepseek import ChatDeepSeek
 from langchain_ollama import ChatOllama
 from langchain.agents import AgentExecutor, create_react_agent
 from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain.tools import Tool
 from enum import Enum
 
 class LLMProvider(str, Enum):
@@ -55,11 +56,18 @@ def setup_vectorstore(documents: List[Any], qdrant_url: str) -> Qdrant:
     )
 
 def setup_agent(vectorstore: Qdrant, provider: LLMProvider = LLMProvider.OLLAMA) -> AgentExecutor:
-    from langchain.agents import create_react_agent
     
-    # Create tools
-    retriever = vectorstore.as_retriever()
+    # Create tools with descriptions
+    retriever = Tool(
+        name="retriever",
+        description="Search in the vector database for relevant information. Input should be a search query.",
+        func=vectorstore.as_retriever().get_relevant_documents
+    )
+    
     search = TavilySearchResults()
+    search.name = "tavily_search"
+    search.description = "Search the web for real-time information. Input should be a search query."
+    
     tools = [retriever, search]
     
     # Create LLM based on provider
@@ -75,15 +83,38 @@ def setup_agent(vectorstore: Qdrant, provider: LLMProvider = LLMProvider.OLLAMA)
             temperature=0
         )
     
-    # Create prompt
+    # Create prompt for ReAct agent
+    template = """Answer the following questions as best you can. You have access to the following tools:
+
+{tools}
+
+Use the following format:
+
+Question: the input question you must answer
+Thought: you should always think about what to do
+Action: the action to take, should be one of [{tool_names}]
+Action Input: the input to the action
+Observation: the result of the action
+... (this Thought/Action/Action Input/Observation can repeat N times)
+Thought: I now know the final answer
+Final Answer: the final answer to the original input question
+
+Begin!
+
+Question: {input}
+Thought:{agent_scratchpad}"""
+
+    # Create prompt for ReAct agent
     prompt = ChatPromptTemplate.from_messages([
-        ("system", "You are a helpful AI assistant that can use tools to get information and answer questions accurately. Always use the available tools when needed."),
-        ("user", "{input}"),
-        MessagesPlaceholder(variable_name="agent_scratchpad")
+        ("system", template)
     ])
     
     # Create the agent using ReAct approach
-    agent = create_react_agent(llm, tools, prompt)
+    agent = create_react_agent(
+        llm=llm,
+        tools=tools,
+        prompt=prompt
+    )
     
     return AgentExecutor(agent=agent, tools=tools)
 
@@ -104,7 +135,11 @@ def main():
         agent_executor = setup_agent(vectorstore, provider)
         
         # Example query
-        result = agent_executor.invoke({"input": "What is Kafka?"})
+        result = agent_executor.invoke(
+            {
+                "input": "What is Kafka?",
+            }
+        )
         print(result)
         
     except Exception as e:
